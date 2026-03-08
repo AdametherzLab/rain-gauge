@@ -5,7 +5,6 @@ import type {
   PeriodTotals,
   RollingAverage,
   DroughtReport,
-  DroughtSeverity,
   RainfallIntensity,
   Millimeters,
   Days,
@@ -39,6 +38,21 @@ export class RainGaugeLogger implements RainfallLogger {
   }
 
   /**
+   * Get the number of recorded entries.
+   * @returns The total count of stored rainfall entries.
+   */
+  get size(): number {
+    return this.entries.length;
+  }
+
+  /**
+   * Clear all recorded entries.
+   */
+  clear(): void {
+    this.entries.length = 0;
+  }
+
+  /**
    * Calculate totals for specified periods.
    * @param query - Date range to aggregate
    * @param periodType - Type of period grouping
@@ -49,34 +63,6 @@ export class RainGaugeLogger implements RainfallLogger {
       (e) => e.timestamp >= query.startDate && e.timestamp <= query.endDate
     );
     return calculateTotals(filteredEntries, periodType);
-  }
-
-  private getPeriodKey(date: Date, type: PeriodType): string {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, "0");
-    const d = String(date.getDate()).padStart(2, "0");
-    if (type === "daily") return `${y}-${m}-${d}`;
-    if (type === "monthly") return `${y}-${m}`;
-
-    // For weekly, use ISO week date calculation
-    // Create a new Date object to avoid modifying the original
-    const tempDate = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-    const dayNum = tempDate.getUTCDay() || 7; // Make Sunday 7, not 0
-    tempDate.setUTCDate(tempDate.getUTCDate() + 4 - dayNum); // Set to nearest Thursday
-    const yearStart = new Date(Date.UTC(tempDate.getUTCFullYear(), 0, 1));
-    const weekNumber = Math.ceil(((tempDate.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
-    const week = String(weekNumber).padStart(2, "0");
-    return `${tempDate.getUTCFullYear()}-W${week}`;
-  }
-
-  private averageIntensity(arr: RainfallIntensity[]): RainfallIntensity | null {
-    if (arr.length === 0) return null;
-    const val: Record<RainfallIntensity, number> = { light: 1, moderate: 2, heavy: 3, violent: 4 };
-    const avg = arr.reduce((s, i) => s + val[i], 0) / arr.length;
-    if (avg <= 1.5) return "light";
-    if (avg <= 2.5) return "moderate";
-    if (avg <= 3.5) return "heavy";
-    return "violent";
   }
 
   /**

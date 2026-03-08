@@ -29,19 +29,11 @@ function dateKey(d: Date): string {
  * @returns A string representing the week in YYYY-WNN format.
  */
 function weekKey(d: Date): string {
-  const date = new Date(d.getTime()); // Create a mutable copy
-  date.setUTCHours(0, 0, 0, 0); // Normalize to start of day UTC
-
-  // Set to nearest Thursday: current date + 4 - current day number
-  // (Sunday=0, Monday=1, ..., Saturday=6)
+  const date = new Date(d.getTime());
+  date.setUTCHours(0, 0, 0, 0);
   date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
-
-  // Get first day of year
   const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
-
-  // Calculate full weeks to nearest Thursday
   const weekNo = Math.ceil((((date.getTime() - yearStart.getTime()) / MS_PER_DAY) + 1) / 7);
-
   return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
 }
 
@@ -79,6 +71,15 @@ function modeIntensity(arr: readonly RainfallIntensity[]): RainfallIntensity | n
 }
 
 /**
+ * Validates that a value is a valid Date object.
+ * @param d - The value to validate.
+ * @returns True if the value is a valid Date.
+ */
+function isValidDate(d: unknown): d is Date {
+  return d instanceof Date && !isNaN((d as Date).getTime());
+}
+
+/**
  * Aggregates rainfall entries into daily, weekly, or monthly totals.
  * @param entries - Rainfall measurements to aggregate.
  * @param periodType - Time bucket type ('daily', 'weekly', 'monthly').
@@ -98,7 +99,7 @@ export function calculateTotals(
   const groups = new Map<string, { total: Millimeters; count: number; intensities: RainfallIntensity[] }>();
   
   for (const e of entries) {
-    if (!(e.timestamp instanceof Date) || isNaN(e.timestamp.getTime())) {
+    if (!isValidDate(e.timestamp)) {
       throw new Error(`Invalid timestamp: ${e.timestamp}`);
     }
     const key = getPeriodKey(e.timestamp, periodType);
@@ -147,18 +148,16 @@ export function calculateRollingAverage(
   
   const daily = new Map<string, Millimeters>();
   for (const e of entries) {
-    // Ensure timestamp is valid before using
-    if (!(e.timestamp instanceof Date) || isNaN(e.timestamp.getTime())) {
+    if (!isValidDate(e.timestamp)) {
       throw new Error(`Invalid timestamp in entries for rolling average: ${e.timestamp}`);
     }
     const k = dateKey(e.timestamp);
-    daily.set(k, (daily.get(k) ?? 0) + e.amount as Millimeters);
+    daily.set(k, ((daily.get(k) ?? 0) + e.amount) as Millimeters);
   }
   
   const dates = Array.from(daily.keys()).sort();
 
   if (dates.length === 0) {
-    // If no valid rainfall data, return 0 for average
     const now = new Date();
     return {
       windowDays,
@@ -168,9 +167,8 @@ export function calculateRollingAverage(
     };
   }
 
-  // Determine the effective window based on available data and windowDays
   let windowStartIdx = 0;
-  let windowEndIdx = dates.length - 1;
+  const windowEndIdx = dates.length - 1;
 
   if (dates.length > windowDays) {
     windowStartIdx = dates.length - windowDays;
@@ -180,7 +178,6 @@ export function calculateRollingAverage(
   const actualWindowDays = effectiveWindowDates.length as Days;
 
   if (actualWindowDays === 0) {
-    // This case should ideally be caught by dates.length === 0, but as a safeguard
     const now = new Date();
     return {
       windowDays,
@@ -190,7 +187,7 @@ export function calculateRollingAverage(
     };
   }
 
-  const total = effectiveWindowDates.reduce((s, d) => s + (daily.get(d) ?? 0), 0 as Millimeters);
+  const total = effectiveWindowDates.reduce((s, d) => s + (daily.get(d) ?? 0), 0);
   
   return {
     windowDays: actualWindowDays,
@@ -230,7 +227,7 @@ export function classifyIntensity(
 
 /**
  * Detects drought conditions based on consecutive dry days.
- * A day is considered 'dry' if rainfall is less than or equal to TRACE_RAINFALL.
+ * A day is considered 'dry' if rainfall is less than or equal to TRACE_RAINFALL (0.2mm).
  * @param entries - Rainfall measurements to analyze.
  * @param thresholdDays - The number of consecutive dry days to qualify as a drought.
  * @returns A DroughtReport object.
@@ -256,15 +253,13 @@ export function detectDrought(
     };
   }
 
-  // Group rainfall by day
   const dailyRainfall = new Map<string, Millimeters>();
   for (const e of entries) {
-    if (!(e.timestamp instanceof Date) || isNaN(e.timestamp.getTime())) {
-      console.warn(`Skipping invalid timestamp in drought detection: ${e.timestamp}`);
+    if (!isValidDate(e.timestamp)) {
       continue;
     }
     const k = dateKey(e.timestamp);
-    dailyRainfall.set(k, (dailyRainfall.get(k) ?? 0) + e.amount as Millimeters);
+    dailyRainfall.set(k, ((dailyRainfall.get(k) ?? 0) + e.amount) as Millimeters);
   }
 
   const sortedDates = Array.from(dailyRainfall.keys()).sort();
@@ -283,9 +278,7 @@ export function detectDrought(
   let droughtStartDate: Date | null = null;
   let currentStreakStartDate: Date | null = null;
 
-  // Iterate through the sorted dates to find the longest dry streak
-  for (let i = 0; i < sortedDates.length; i++) {
-    const dateStr = sortedDates[i];
+  for (const dateStr of sortedDates) {
     const rainfall = dailyRainfall.get(dateStr) ?? (0 as Millimeters);
 
     if (rainfall <= TRACE_RAINFALL) {

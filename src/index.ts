@@ -1,6 +1,7 @@
 /**
- * Public API barrel file for rain-gauge.
- * Re-exports all types and functions from the internal modules.
+ * rain-gauge — Type-safe rainfall measurement logger with drought detection
+ * and temporal analytics.
+ * @packageDocumentation
  */
 
 // Type definitions

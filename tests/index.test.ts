@@ -71,7 +71,7 @@ describe("rain-gauge public API", () => {
     logger.record({ timestamp: new Date("2024-02-02T12:00:00Z"), amount: 0.1 as Millimeters });
     logger.record({ timestamp: new Date("2024-02-03T12:00:00Z"), amount: 0.0 as Millimeters });
     logger.record({ timestamp: new Date("2024-02-04T12:00:00Z"), amount: 0.0 as Millimeters });
-    logger.record({ timestamp: new Date("2024-02-05T12:00:00Z"), amount: 5.0 as Millimeters }); // Breaks streak
+    logger.record({ timestamp: new Date("2024-02-05T12:00:00Z"), amount: 5.0 as Millimeters });
 
     const query: DateRangeQuery = {
       startDate: new Date("2024-02-01T00:00:00Z"),
@@ -81,7 +81,7 @@ describe("rain-gauge public API", () => {
     const report = logger.detectDrought(query, 3 as Days);
     expect(report.isDrought).toBe(true);
     expect(report.consecutiveDryDays).toBe(4);
-    expect(report.severity).toBe("mild"); // 4 days dry, threshold 3, 4 < 3*1.5
+    expect(report.severity).toBe("mild");
   });
 
   it("RainGaugeLogger calculates rolling average correctly", () => {
@@ -104,5 +104,37 @@ describe("rain-gauge public API", () => {
     expect(rollingAverage.averagePerDay).toBeCloseTo((10 + 20 + 15 + 5 + 0 + 10 + 20) / 7);
     expect(rollingAverage.windowStart.toISOString().slice(0, 10)).toBe("2024-03-01");
     expect(rollingAverage.windowEnd.toISOString().slice(0, 10)).toBe("2024-03-07");
+  });
+
+  it("RainGaugeLogger size and clear work correctly", () => {
+    const logger = new RainGaugeLogger();
+    expect(logger.size).toBe(0);
+
+    logger.record({ timestamp: new Date("2024-01-01T10:00:00Z"), amount: 5.0 as Millimeters });
+    logger.record({ timestamp: new Date("2024-01-02T10:00:00Z"), amount: 3.0 as Millimeters });
+    expect(logger.size).toBe(2);
+
+    logger.clear();
+    expect(logger.size).toBe(0);
+  });
+
+  it("classifyIntensity covers all intensity levels", () => {
+    expect(classifyIntensity(1.0 as Millimeters, 1)).toBe("light");
+    expect(classifyIntensity(5.0 as Millimeters, 1)).toBe("moderate");
+    expect(classifyIntensity(20.0 as Millimeters, 1)).toBe("heavy");
+    expect(classifyIntensity(60.0 as Millimeters, 1)).toBe("violent");
+  });
+
+  it("detectDrought returns no drought when rainfall is sufficient", () => {
+    const entries: readonly RainfallEntry[] = [
+      { timestamp: new Date("2024-06-01T12:00:00Z"), amount: 5.0 as Millimeters },
+      { timestamp: new Date("2024-06-02T12:00:00Z"), amount: 3.0 as Millimeters },
+      { timestamp: new Date("2024-06-03T12:00:00Z"), amount: 8.0 as Millimeters },
+    ];
+
+    const report = detectDrought(entries, 3 as Days);
+    expect(report.isDrought).toBe(false);
+    expect(report.consecutiveDryDays).toBe(0);
+    expect(report.severity).toBe("none");
   });
 });
