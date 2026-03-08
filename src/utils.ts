@@ -59,7 +59,7 @@ function getPeriodKey(d: Date, t: PeriodType): string {
 
 /**
  * Finds the mode (most frequent) rainfall intensity in an array.
- * @param arr - An array of RainfallIntensity values.
+ * @param arr - An array of RainfallIntensity values. 
  * @returns The most frequent RainfallIntensity, or null if the array is empty.
  */
 function modeIntensity(arr: readonly RainfallIntensity[]): RainfallIntensity | null {
@@ -156,19 +156,47 @@ export function calculateRollingAverage(
   }
   
   const dates = Array.from(daily.keys()).sort();
-  if (dates.length < windowDays) {
-    throw new Error(`Insufficient data: need ${windowDays} days but have ${dates.length}`);
+
+  if (dates.length === 0) {
+    // If no valid rainfall data, return 0 for average
+    const now = new Date();
+    return {
+      windowDays,
+      averagePerDay: 0 as Millimeters,
+      windowStart: new Date(now.getTime() - (windowDays - 1) * MS_PER_DAY),
+      windowEnd: now
+    };
   }
-  
-  // Take the last `windowDays` dates for the rolling average
-  const windowDates = dates.slice(-windowDays);
-  const total = windowDates.reduce((s, d) => s + (daily.get(d) ?? 0), 0 as Millimeters);
+
+  // Determine the effective window based on available data and windowDays
+  let windowStartIdx = 0;
+  let windowEndIdx = dates.length - 1;
+
+  if (dates.length > windowDays) {
+    windowStartIdx = dates.length - windowDays;
+  }
+
+  const effectiveWindowDates = dates.slice(windowStartIdx, windowEndIdx + 1);
+  const actualWindowDays = effectiveWindowDates.length as Days;
+
+  if (actualWindowDays === 0) {
+    // This case should ideally be caught by dates.length === 0, but as a safeguard
+    const now = new Date();
+    return {
+      windowDays,
+      averagePerDay: 0 as Millimeters,
+      windowStart: new Date(now.getTime() - (windowDays - 1) * MS_PER_DAY),
+      windowEnd: now
+    };
+  }
+
+  const total = effectiveWindowDates.reduce((s, d) => s + (daily.get(d) ?? 0), 0 as Millimeters);
   
   return {
-    windowDays,
-    averagePerDay: (total / windowDays) as Millimeters,
-    windowStart: new Date(windowDates[0]),
-    windowEnd: new Date(windowDates[windowDates.length - 1])
+    windowDays: actualWindowDays,
+    averagePerDay: (total / actualWindowDays) as Millimeters,
+    windowStart: new Date(effectiveWindowDates[0]),
+    windowEnd: new Date(effectiveWindowDates[effectiveWindowDates.length - 1])
   };
 }
 
@@ -201,14 +229,14 @@ export function classifyIntensity(
 }
 
 /**
- * Detects drought conditions by analyzing consecutive dry days (≤0.2mm).
+ * Detects drought conditions based on consecutive dry days.
+ * A day is considered 'dry' if rainfall is less than or equal to TRACE_RAINFALL.
  * @param entries - Rainfall measurements to analyze.
- * @param thresholdDays - Number of consecutive dry days to constitute drought.
- * @returns Drought report with severity classification.
+ * @param thresholdDays - The number of consecutive dry days to qualify as a drought.
+ * @returns A DroughtReport object.
  * @throws {RangeError} If thresholdDays is less than 1.
- * @throws {Error} If entries array is empty.
  * @example
- * const report = detectDrought(entries, 15 as Days);
+ * const report = detectDrought(entries, 5 as Days);
  */
 export function detectDrought(
   entries: readonly RainfallEntry[],
@@ -217,62 +245,83 @@ export function detectDrought(
   if (thresholdDays < 1) {
     throw new RangeError('Threshold days must be at least 1');
   }
-  if (!entries.length) {
-    throw new Error('Cannot detect drought: no entries provided');
-  }
   
-  const daily = new Map<string, Millimeters>();
+  if (!entries.length) {
+    return {
+      isDrought: false,
+      consecutiveDryDays: 0 as Days,
+      droughtStartDate: null,
+      severity: 'none',
+      droughtThreshold: thresholdDays,
+    };
+  }
+
+  // Group rainfall by day
+  const dailyRainfall = new Map<string, Millimeters>();
   for (const e of entries) {
-    // Ensure timestamp is valid before using
     if (!(e.timestamp instanceof Date) || isNaN(e.timestamp.getTime())) {
-      throw new Error(`Invalid timestamp in entries for drought detection: ${e.timestamp}`);
+      console.warn(`Skipping invalid timestamp in drought detection: ${e.timestamp}`);
+      continue;
     }
     const k = dateKey(e.timestamp);
-    daily.set(k, (daily.get(k) ?? 0) + e.amount as Millimeters);
+    dailyRainfall.set(k, (dailyRainfall.get(k) ?? 0) + e.amount as Millimeters);
   }
-  
-  const dates = Array.from(daily.keys()).sort();
-  let currentStreak = 0;
-  let maxStreak = 0;
-  let droughtStart: Date | null = null;
+
+  const sortedDates = Array.from(dailyRainfall.keys()).sort();
+  if (sortedDates.length === 0) {
+    return {
+      isDrought: false,
+      consecutiveDryDays: 0 as Days,
+      droughtStartDate: null,
+      severity: 'none',
+      droughtThreshold: thresholdDays,
+    };
+  }
+
+  let maxDryStreak = 0;
+  let currentDryStreak = 0;
+  let droughtStartDate: Date | null = null;
   let currentStreakStartDate: Date | null = null;
-  
-  for (let i = 0; i < dates.length; i++) {
-    const d = dates[i];
-    const amount = daily.get(d) ?? 0 as Millimeters;
-    if (amount <= TRACE_RAINFALL) {
-      if (currentStreak === 0) {
-        currentStreakStartDate = new Date(d);
+
+  // Iterate through the sorted dates to find the longest dry streak
+  for (let i = 0; i < sortedDates.length; i++) {
+    const dateStr = sortedDates[i];
+    const rainfall = dailyRainfall.get(dateStr) ?? (0 as Millimeters);
+
+    if (rainfall <= TRACE_RAINFALL) {
+      if (currentDryStreak === 0) {
+        currentStreakStartDate = new Date(dateStr);
       }
-      currentStreak++;
-      if (currentStreak > maxStreak) {
-        maxStreak = currentStreak;
-        droughtStart = currentStreakStartDate;
-      }
+      currentDryStreak++;
     } else {
-      currentStreak = 0;
+      currentDryStreak = 0;
       currentStreakStartDate = null;
     }
+
+    if (currentDryStreak > maxDryStreak) {
+      maxDryStreak = currentDryStreak;
+      droughtStartDate = currentStreakStartDate;
+    }
   }
-  
-  const isDrought = maxStreak >= thresholdDays;
+
+  const isDrought = maxDryStreak >= thresholdDays;
   let severity: DroughtSeverity = 'none';
 
   if (isDrought) {
-    if (maxStreak >= thresholdDays * 2) { // Example: twice the threshold for severe
+    if (maxDryStreak >= thresholdDays * 3) {
       severity = 'severe';
-    } else if (maxStreak >= thresholdDays * 1.5) { // Example: 1.5 times for moderate
+    } else if (maxDryStreak >= thresholdDays * 2) {
       severity = 'moderate';
     } else {
       severity = 'mild';
     }
   }
-  
+
   return {
     isDrought,
-    consecutiveDryDays: maxStreak as Days,
-    droughtStartDate: droughtStart,
+    consecutiveDryDays: maxDryStreak as Days,
+    droughtStartDate,
     severity,
-    droughtThreshold: thresholdDays
+    droughtThreshold: thresholdDays,
   };
 }
