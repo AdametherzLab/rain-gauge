@@ -11,115 +11,95 @@ Type-safe rainfall measurement logger with drought detection, temporal analytics
 - **Temporal analytics** — Daily, weekly, or monthly totals with rolling averages
 - **Intensity classification** — Light/moderate/heavy/violent per WMO guidelines
 - **Persistence** — Save/load data to JSON files or SQLite databases
+- **CLI included** — Log and report from the command line without writing code
 - **Zero required dependencies** — Pure TypeScript core, optional `better-sqlite3` for DB storage
 
 ## Installation
 
 bash
 npm install @adametherzlab/rain-gauge
-# or
-bun add @adametherzlab/rain-gauge
 
 
-## Quick Start
+## Usage
+
+### Library API
 
 
-import { RainGaugeLogger, type Millimeters, type Days } from '@adametherzlab/rain-gauge';
+import { RainGaugeLogger, FileStore, type Millimeters, type Days } from '@adametherzlab/rain-gauge';
 
-const logger = new RainGaugeLogger();
-logger.record({ timestamp: new Date(), amount: 12.5 as Millimeters });
+const logger = new RainGaugeLogger({ 
+  store: new FileStore('./rainfall.json') 
+});
 
+// Record rainfall
+logger.record({ 
+  timestamp: new Date(), 
+  amount: 15.5 as Millimeters 
+});
 
-## Persistence
+// Get monthly totals
+const totals = logger.getTotals(
+  { startDate: new Date('2024-01-01'), endDate: new Date() },
+  'monthly'
+);
 
-rain-gauge supports two persistence backends: JSON files and SQLite.
-
-### File Persistence
-
-
-import { RainGaugeLogger, FileStore, type Millimeters } from '@adametherzlab/rain-gauge';
-
-const store = new FileStore('./rainfall-data.json');
-const logger = new RainGaugeLogger({ store });
-
-// Entries are automatically persisted on record()
-logger.record({ timestamp: new Date('2024-06-01T10:00:00Z'), amount: 5.0 as Millimeters });
-
-// Data survives restarts — create a new logger with the same store
-const logger2 = new RainGaugeLogger({ store });
-console.log(logger2.size); // 1
-
-
-### SQLite Persistence
+// Check for drought
+const drought = logger.detectDrought(
+  { startDate: new Date('2024-01-01'), endDate: new Date() },
+  7 as Days
+);
 
 
-import { RainGaugeLogger, SqliteStore, type Millimeters } from '@adametherzlab/rain-gauge';
+### CLI Usage
 
-const store = new SqliteStore('./rainfall.db');
-const logger = new RainGaugeLogger({ store });
+Rain Gauge includes a command-line interface for quick manual entry and reports.
 
-logger.record({ timestamp: new Date('2024-06-01T10:00:00Z'), amount: 8.0 as Millimeters });
+bash
+# Log rainfall (amount in mm)
+npx rain-gauge log 25.4 --date 2024-03-15
 
-// Don't forget to close the database when done
-store.close();
+# View daily/weekly/monthly report
+npx rain-gauge report --period monthly
 
+# Check drought status
+npx rain-gauge drought --threshold 5
 
-### Manual Save/Load
-
-Disable auto-loading and control persistence manually:
-
-
-const logger = new RainGaugeLogger({ store, autoLoad: false });
-
-// Record entries...
-logger.record({ timestamp: new Date(), amount: 3.0 as Millimeters });
-
-// Manually save all in-memory data
-logger.save();
-
-// Manually reload from store
-logger.load();
+# Use SQLite storage
+npx rain-gauge log 10.5 --store ./rain.db
 
 
-### Custom Store
+#### CLI Commands
 
-Implement the `RainfallStore` interface for any backend:
+**log <amount>** - Record rainfall amount
+  - `-d, --date <iso-date>` - Date of measurement (default: now)
+  - `-s, --store <path>` - Data file (.json or .db)
 
+**report** - Show rainfall totals
+  - `-p, --period <daily|weekly|monthly>` - Aggregation period (default: daily)
+  - `-f, --format <table|json>` - Output format (default: table)
 
-import type { RainfallStore, RainfallEntry } from '@adametherzlab/rain-gauge';
+**drought** - Check drought conditions
+  - `-t, --threshold <days>` - Dry days threshold (default: 3)
+  - `-f, --format <table|json>` - Output format
 
-class MyCustomStore implements RainfallStore {
-  saveAll(entries: readonly RainfallEntry[]): void { /* ... */ }
-  loadAll(): RainfallEntry[] { /* ... */ }
-  append(entry: RainfallEntry): void { /* ... */ }
-  clear(): void { /* ... */ }
-}
+**clear** - Remove all data
+  - `-s, --store <path>` - Target data file
 
+#### CLI Examples
 
-## API
+bash
+# Log today's rainfall
+rain-gauge log 25.4
 
-### `RainGaugeLogger`
+# View monthly totals for last 30 days
+rain-gauge report --period monthly --format json
 
-| Method | Description |
-|--------|-------------|
-| `record(entry)` | Record a rainfall measurement (auto-persists if store configured) |
-| `getTotals(query, periodType)` | Aggregate by daily/weekly/monthly |
-| `getRollingAverage(query, windowDays)` | Rolling average over N days |
-| `detectDrought(query, thresholdDays)` | Detect drought conditions |
-| `classifyIntensity(amount, hours)` | Classify rainfall rate |
-| `save()` | Manually save all data to store |
-| `load()` | Manually load data from store |
-| `clear()` | Clear in-memory and persisted data |
-| `size` | Number of recorded entries |
+# Check for drought (5+ dry days)
+rain-gauge drought --threshold 5
 
-### Utility Functions
+# Clear all data
+rain-gauge clear --store ./rain.json
 
-| Function | Description |
-|----------|-------------|
-| `calculateTotals(entries, periodType)` | Aggregate entries into period totals |
-| `calculateRollingAverage(entries, windowDays)` | Compute rolling average |
-| `classifyIntensity(amount, durationHours)` | Classify rainfall intensity |
-| `detectDrought(entries, thresholdDays)` | Detect drought from entries |
 
 ## License
 
