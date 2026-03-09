@@ -2,7 +2,7 @@
 
 # rain-gauge
 
-Type-safe rainfall measurement logger with drought detection and temporal analytics.
+Type-safe rainfall measurement logger with drought detection, temporal analytics, and optional persistence.
 
 ## Features
 
@@ -10,7 +10,8 @@ Type-safe rainfall measurement logger with drought detection and temporal analyt
 - **Drought detection** — Configurable severity thresholds (mild/moderate/severe)
 - **Temporal analytics** — Daily, weekly, or monthly totals with rolling averages
 - **Intensity classification** — Light/moderate/heavy/violent per WMO guidelines
-- **Zero dependencies** — Pure TypeScript, strict mode, Bun or Node.js 20+
+- **Persistence** — Save/load data to JSON files or SQLite databases
+- **Zero required dependencies** — Pure TypeScript core, optional `better-sqlite3` for DB storage
 
 ## Installation
 
@@ -23,30 +24,76 @@ bun add @adametherzlab/rain-gauge
 ## Quick Start
 
 
-import { RainGaugeLogger, type Millimeters, type Days, type DateRangeQuery } from '@adametherzlab/rain-gauge';
+import { RainGaugeLogger, type Millimeters, type Days } from '@adametherzlab/rain-gauge';
 
 const logger = new RainGaugeLogger();
+logger.record({ timestamp: new Date(), amount: 12.5 as Millimeters });
 
-// Record measurements
-logger.record({ timestamp: new Date('2024-03-15T10:00:00Z'), amount: 10.0 as Millimeters });
-logger.record({ timestamp: new Date('2024-03-15T14:00:00Z'), amount: 5.5 as Millimeters });
-logger.record({ timestamp: new Date('2024-03-16T09:00:00Z'), amount: 0.0 as Millimeters });
 
-// Query totals
-const query: DateRangeQuery = {
-  startDate: new Date('2024-03-15T00:00:00Z'),
-  endDate: new Date('2024-03-16T23:59:59Z'),
-};
-const daily = logger.getTotals(query, 'daily');
-// [{ period: '2024-03-15', total: 15.5, count: 2, ... }, { period: '2024-03-16', total: 0, count: 1, ... }]
+## Persistence
 
-// Detect drought
-const drought = logger.detectDrought(query, 2 as Days);
-// { isDrought: false, consecutiveDryDays: 1, severity: 'none', ... }
+rain-gauge supports two persistence backends: JSON files and SQLite.
 
-// Classify intensity
-const intensity = logger.classifyIntensity(25 as Millimeters, 2);
-// 'heavy'
+### File Persistence
+
+
+import { RainGaugeLogger, FileStore, type Millimeters } from '@adametherzlab/rain-gauge';
+
+const store = new FileStore('./rainfall-data.json');
+const logger = new RainGaugeLogger({ store });
+
+// Entries are automatically persisted on record()
+logger.record({ timestamp: new Date('2024-06-01T10:00:00Z'), amount: 5.0 as Millimeters });
+
+// Data survives restarts — create a new logger with the same store
+const logger2 = new RainGaugeLogger({ store });
+console.log(logger2.size); // 1
+
+
+### SQLite Persistence
+
+
+import { RainGaugeLogger, SqliteStore, type Millimeters } from '@adametherzlab/rain-gauge';
+
+const store = new SqliteStore('./rainfall.db');
+const logger = new RainGaugeLogger({ store });
+
+logger.record({ timestamp: new Date('2024-06-01T10:00:00Z'), amount: 8.0 as Millimeters });
+
+// Don't forget to close the database when done
+store.close();
+
+
+### Manual Save/Load
+
+Disable auto-loading and control persistence manually:
+
+
+const logger = new RainGaugeLogger({ store, autoLoad: false });
+
+// Record entries...
+logger.record({ timestamp: new Date(), amount: 3.0 as Millimeters });
+
+// Manually save all in-memory data
+logger.save();
+
+// Manually reload from store
+logger.load();
+
+
+### Custom Store
+
+Implement the `RainfallStore` interface for any backend:
+
+
+import type { RainfallStore, RainfallEntry } from '@adametherzlab/rain-gauge';
+
+class MyCustomStore implements RainfallStore {
+  saveAll(entries: readonly RainfallEntry[]): void { /* ... */ }
+  loadAll(): RainfallEntry[] { /* ... */ }
+  append(entry: RainfallEntry): void { /* ... */ }
+  clear(): void { /* ... */ }
+}
 
 
 ## API
@@ -55,35 +102,24 @@ const intensity = logger.classifyIntensity(25 as Millimeters, 2);
 
 | Method | Description |
 |--------|-------------|
-| `record(entry)` | Record a rainfall measurement |
-| `getTotals(query, periodType)` | Aggregate totals by day/week/month |
+| `record(entry)` | Record a rainfall measurement (auto-persists if store configured) |
+| `getTotals(query, periodType)` | Aggregate by daily/weekly/monthly |
 | `getRollingAverage(query, windowDays)` | Rolling average over N days |
 | `detectDrought(query, thresholdDays)` | Detect drought conditions |
-| `classifyIntensity(amount, hours)` | Classify rainfall intensity |
+| `classifyIntensity(amount, hours)` | Classify rainfall rate |
+| `save()` | Manually save all data to store |
+| `load()` | Manually load data from store |
+| `clear()` | Clear in-memory and persisted data |
 | `size` | Number of recorded entries |
-| `clear()` | Remove all recorded entries |
 
-### Standalone Functions
+### Utility Functions
 
 | Function | Description |
 |----------|-------------|
 | `calculateTotals(entries, periodType)` | Aggregate entries into period totals |
 | `calculateRollingAverage(entries, windowDays)` | Compute rolling average |
-| `classifyIntensity(amount, hours)` | Classify intensity by rate |
+| `classifyIntensity(amount, durationHours)` | Classify rainfall intensity |
 | `detectDrought(entries, thresholdDays)` | Detect drought from entries |
-
-### Types
-
-- `Millimeters` — Branded number type for rainfall amounts
-- `Days` — Branded number type for day counts
-- `RainfallEntry` — Timestamped measurement record
-- `DateRangeQuery` — Start/end date range filter
-- `PeriodTotals` — Aggregated period result
-- `RollingAverage` — Rolling average result
-- `DroughtReport` — Drought analysis result
-- `RainfallIntensity` — `'light' | 'moderate' | 'heavy' | 'violent'`
-- `DroughtSeverity` — `'none' | 'mild' | 'moderate' | 'severe'`
-- `PeriodType` — `'daily' | 'weekly' | 'monthly'`
 
 ## License
 
